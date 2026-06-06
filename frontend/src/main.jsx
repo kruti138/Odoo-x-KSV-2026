@@ -43,6 +43,18 @@ const roleNavigation = {
     ["activity", "Audit Logs", Activity]
   ]
 };
+const pagePermissions = {
+  dashboard: ["Procurement Officer", "Vendor", "Manager / Approver", "Admin"],
+  users: ["Admin"],
+  vendors: ["Procurement Officer", "Admin"],
+  rfqs: ["Procurement Officer", "Vendor", "Admin"],
+  quotations: ["Procurement Officer", "Vendor", "Admin"],
+  approvals: ["Procurement Officer", "Manager / Approver", "Admin"],
+  orders: ["Procurement Officer", "Vendor", "Admin"],
+  invoices: ["Procurement Officer", "Admin"],
+  reports: ["Admin"],
+  activity: ["Procurement Officer", "Vendor", "Manager / Approver", "Admin"]
+};
 const money = (value = 0) => `₹${Math.round(value).toLocaleString("en-IN")}`;
 const initials = (name = "") => name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
 const date = (value) => value ? new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Pending";
@@ -96,7 +108,7 @@ function Auth({ onAuth }) {
   const [form, setForm] = useState({
     firstName: "", lastName: "", email: "", password: "", phone: "",
     role: inviteToken ? "Manager / Approver" : "Procurement Officer",
-    country: "", additionalInfo: "", companyName: "", category: "", gst: "",
+    country: "", organizationName: "", companyName: "", category: "", gst: "",
     inviteToken: inviteToken || ""
   });
   useEffect(() => {
@@ -111,7 +123,11 @@ function Auth({ onAuth }) {
       })
       .then((info) => {
         setInviteInfo(info);
-        if (info.email) setForm((current) => ({ ...current, email: info.email }));
+        setForm((current) => ({
+          ...current,
+          email: info.email || current.email,
+          organizationName: info.communityName || current.organizationName
+        }));
       })
       .catch((err) => setInviteError(err.message));
   }, [inviteToken]);
@@ -151,8 +167,8 @@ function Auth({ onAuth }) {
           {signup && <><Field label="First Name" icon={User} placeholder="Enter your first name" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required /><Field label="Last Name" icon={User} placeholder="Enter your last name" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required /></>}
           <Field label="Email Address" className="span-2" icon={Mail} type="email" placeholder="Enter your email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required readOnly={!!inviteInfo?.email} />
           {!forgot && <Field label="Password" className="span-2" icon={LockKeyhole} type="password" placeholder="Enter your password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />}
-          {signup && !inviteToken && <><Field label="Phone Number" icon={Phone} placeholder="Enter your phone number" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /><Field label="Role" icon={ShieldCheck} as="select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{["Procurement Officer", "Vendor", "Manager / Approver", "Admin"].map((role) => <option key={role}>{role}</option>)}</Field><Field label="Country" className="span-2" icon={Globe2} value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} />{form.role === "Vendor" && <><Field label="Company / Vendor Name" className="span-2" icon={Building2} value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} required /><Field label="Vendor Category" icon={Boxes} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required /><Field label="GST Number" icon={FileText} value={form.gst} onChange={(e) => setForm({ ...form, gst: e.target.value })} required /></>}<Field label="Additional Information (Optional)" className="span-2" icon={FileText} value={form.additionalInfo} onChange={(e) => setForm({ ...form, additionalInfo: e.target.value })} /></>}
-          {signup && inviteToken && <Field label="Phone Number" className="span-2" icon={Phone} placeholder="Enter your phone number" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />}
+          {signup && !inviteToken && <><Field label="Phone Number" icon={Phone} placeholder="Enter your phone number" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /><Field label="Role" icon={ShieldCheck} as="select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{["Procurement Officer", "Vendor", "Manager / Approver", "Admin"].map((role) => <option key={role}>{role}</option>)}</Field><Field label="Country" className="span-2" icon={Globe2} value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} />{form.role === "Vendor" && <><Field label="Company / Vendor Name" className="span-2" icon={Building2} value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} required /><Field label="Vendor Category" icon={Boxes} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required /><Field label="GST Number" icon={FileText} value={form.gst} onChange={(e) => setForm({ ...form, gst: e.target.value })} required /></>}<Field label="Organization Name" className="span-2" icon={FileText} placeholder="Enter your organization name" value={form.organizationName} onChange={(e) => setForm({ ...form, organizationName: e.target.value })} required={!inviteToken} /></>}
+          {signup && inviteToken && <><Field label="Phone Number" className="span-2" icon={Phone} placeholder="Enter your phone number" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /><Field label="Organization Name" className="span-2" icon={FileText} placeholder="Enter your organization name" value={form.organizationName} onChange={(e) => setForm({ ...form, organizationName: e.target.value })} /></>}
           {inviteError && <div className="form-message">{inviteError}</div>}
           {!signup && !forgot && <div className="auth-options"><label><input type="checkbox" /> Remember me</label><button type="button" onClick={() => setForgot(true)}>Forgot Password?</button></div>}
           {error && <div className={cx("form-message", error.includes("prepared") && "success")}>{error}</div>}
@@ -168,13 +184,23 @@ function Auth({ onAuth }) {
 function Shell({ user, onLogout }) {
   const [page, setPage] = useState("dashboard");
   const [data, setData] = useState(null);
+  const [loadError, setLoadError] = useState("");
   const [collapsed, setCollapsed] = useState(false);
   const [toast, setToast] = useState("");
   const [dark, setDark] = useState(true);
   const [search, setSearch] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const load = async () => setData(await request("/bootstrap"));
-  useEffect(() => { load().catch((err) => setToast(err.message)); }, []);
+  const load = async () => {
+    setLoadError("");
+    try {
+      setData(await request("/bootstrap"));
+    } catch (err) {
+      setLoadError(err.message);
+      setToast(err.message);
+      throw err;
+    }
+  };
+  useEffect(() => { load().catch(() => {}); }, []);
   useEffect(() => {
     if (!userMenuOpen) return undefined;
     const closeMenu = (e) => {
@@ -186,11 +212,18 @@ function Shell({ user, onLogout }) {
     return () => document.removeEventListener("mousedown", closeMenu);
   }, [userMenuOpen]);
   const notify = (message) => { setToast(message); setTimeout(() => setToast(""), 3000); };
-  if (!data) return <div className="loading-screen"><Logo /><span className="spinner" /></div>;
-  const context = { data, setData, reload: load, notify, user, go: setPage };
   const navItems = roleNavigation[user.role] || roleNavigation.Vendor;
+  useEffect(() => {
+    if (!pagePermissions[page]?.includes(user.role)) {
+      setPage("dashboard");
+    }
+  }, [page, user.role]);
+  if (!data) {
+    return <div className="loading-screen"><Logo /><span className="spinner" />{loadError ? <div className="load-error"><h3>Unable to load dashboard</h3><p>{loadError}</p><button className="btn" onClick={load}>Retry</button></div> : null}</div>;
+  }
+  const context = { data, setData, reload: load, notify, user, go: setPage };
   const pages = { dashboard: Dashboard, users: UserManagement, vendors: Vendors, rfqs: Rfqs, quotations: Quotations, approvals: Approvals, orders: Orders, invoices: Invoices, reports: Reports, activity: Activities };
-  const Page = pages[page];
+  const Page = pages[page] || Dashboard;
   return <div className={cx("app", !dark && "light", collapsed && "collapsed")}>
     <aside className={cx("sidebar", collapsed && "collapsed")}>
       <div className="side-logo"><Logo compact={collapsed} /></div>

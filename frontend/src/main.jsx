@@ -385,19 +385,41 @@ function Rfqs({ data, reload, notify, user }) {
 function Quotations({ data, reload, notify, user }) {
   const [selectedRfq, setSelectedRfq] = useState(data.rfqs[0]?.id);
   const [submitModal, setSubmitModal] = useState(false);
+  const [recommendations, setRecommendations] = useState(null);
   const rfq = data.rfqs.find((r) => r.id === selectedRfq);
   const quotes = data.quotations.filter((q) => q.rfqId === selectedRfq).sort((a, b) => a.total - b.total);
   const [form, setForm] = useState({ deliveryDays: 7, taxRate: 18, paymentTerms: "30 days", notes: "", items: [] });
   useEffect(() => { if (rfq) setForm((old) => ({ ...old, items: rfq.items.map((item) => ({ ...item, unitPrice: 0 })) })); }, [selectedRfq]);
   const submit = async (e) => { e.preventDefault(); const vendorId = user.vendorId || data.vendors[0].id; await request("/quotations", { method: "POST", body: JSON.stringify({ ...form, rfqId: selectedRfq, vendorId, status: "Submitted" }) }); await reload(); setSubmitModal(false); notify("Quotation submitted successfully."); };
   const select = async (quote) => { await request("/approvals", { method: "POST", body: JSON.stringify({ rfqId: quote.rfqId, quotationId: quote.id }) }); await reload(); notify("Vendor selected and approval initiated."); };
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      if (!selectedRfq) return setRecommendations(null);
+      try {
+        const res = await request(`/rfqs/${selectedRfq}/recommendations`);
+        if (mounted) setRecommendations(res);
+      } catch (e) {
+        if (mounted) setRecommendations(null);
+      }
+    };
+    load();
+    return () => { mounted = false; };
+  }, [selectedRfq, data]);
   if (user.role === "Vendor") return <VendorQuotationWorkspace data={data} rfq={rfq} quotes={quotes} selectedRfq={selectedRfq} setSelectedRfq={setSelectedRfq} submitModal={submitModal} setSubmitModal={setSubmitModal} form={form} setForm={setForm} submit={submit} />;
   return <>
     <PageHead title="Quotation Comparison" subtitle="Compare price, delivery, ratings and commercial terms" action={<div className="head-actions"><select value={selectedRfq} onChange={(e) => setSelectedRfq(e.target.value)}>{data.rfqs.map((r) => <option value={r.id} key={r.id}>{r.title}</option>)}</select>{["Vendor", "Admin"].includes(user.role) && <Button icon={Plus} onClick={() => setSubmitModal(true)}>Submit Quotation</Button>}</div>} />
     <section className="comparison panel"><header><div><small>{rfq?.number}</small><h2>{rfq?.title}</h2><p>{quotes.length} quotations received · Deadline {date(rfq?.deadline)}</p></div><div className="legend-low"><i /> Lowest total</div></header>
       {quotes.length ? <div className="comparison-grid">
         <div className="criteria"><strong>Criteria</strong>{["Grand Total", "Tax", "Delivery", "Vendor Rating", "Payment Terms", "Decision"].map((item) => <span key={item}>{item}</span>)}</div>
-        {quotes.map((quote, index) => <div className={cx("quote-column", index === 0 && "lowest")} key={quote.id}><strong>{quote.vendor?.name}{index === 0 && <small>Best Value</small>}</strong><span className="quote-total">{money(quote.total)}</span><span>{money(quote.tax)} ({quote.taxRate}%)</span><span>{quote.deliveryDays} days</span><span>★ {quote.vendor?.rating}/5</span><span>{quote.paymentTerms}</span><span>{["Procurement Officer", "Admin"].includes(user.role) ? <Button secondary={index !== 0} onClick={() => select(quote)}>Select {index === 0 && "& Approve"}</Button> : <Status value={quote.status} />}</span></div>)}
+        {quotes.map((quote, index) => {
+          const vendorBadges = recommendations?.badges?.[quote.vendorId] || [];
+          const vendorScore = recommendations?.scores?.[quote.vendorId];
+          return <div className={cx("quote-column", index === 0 && "lowest")} key={quote.id}><strong>{quote.vendor?.name}{index === 0 && <small>Best Value</small>}</strong>
+            {typeof vendorScore !== 'undefined' && <small>Score: {vendorScore}</small>}
+            {vendorBadges.map((b) => <small key={b} style={{ display: 'inline-block', marginLeft: 6 }}>{b}</small>)}
+            <span className="quote-total">{money(quote.total)}</span><span>{money(quote.tax)} ({quote.taxRate}%)</span><span>{quote.deliveryDays} days</span><span>★ {quote.vendor?.rating}/5</span><span>{quote.paymentTerms}</span><span>{["Procurement Officer", "Admin"].includes(user.role) ? <Button secondary={index !== 0} onClick={() => select(quote)}>Select {index === 0 && "& Approve"}</Button> : <Status value={quote.status} />}</span></div>;
+        })}
       </div> : <Empty title="No quotations yet" text="Assigned vendors can submit pricing against this RFQ." />}
     </section>
     {submitModal && <Modal title={`Submit Quotation · ${rfq?.title}`} wide onClose={() => setSubmitModal(false)}><form onSubmit={submit}>{form.items.map((item, i) => <div className="quote-line" key={item.name}><strong>{item.name}</strong><span>Qty {item.quantity}</span><Field label="Unit Price" icon={IndianRupee} type="number" min="0" value={item.unitPrice} onChange={(e) => setForm({ ...form, items: form.items.map((it, index) => index === i ? { ...it, unitPrice: Number(e.target.value) } : it) })} required /></div>)}<div className="form-grid"><Field label="Tax / GST %" type="number" value={form.taxRate} onChange={(e) => setForm({ ...form, taxRate: Number(e.target.value) })} /><Field label="Delivery (days)" icon={Clock3} type="number" value={form.deliveryDays} onChange={(e) => setForm({ ...form, deliveryDays: Number(e.target.value) })} /><Field label="Payment Terms" value={form.paymentTerms} onChange={(e) => setForm({ ...form, paymentTerms: e.target.value })} /><Field label="Notes / Comments" className="span-2" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div><div className="modal-actions"><Button secondary type="button">Save Draft</Button><Button icon={Send}>Submit Quotation</Button></div></form></Modal>}

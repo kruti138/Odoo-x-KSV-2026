@@ -22,6 +22,12 @@ class MemoryStore {
     this.data[name][index] = { ...this.data[name][index], ...clone(changes) };
     return clone(this.data[name][index]);
   }
+  async delete(name, id) {
+    const index = this.data[name].findIndex((item) => item.id === id);
+    if (index < 0) return null;
+    const [deleted] = this.data[name].splice(index, 1);
+    return clone(deleted);
+  }
 }
 
 class MongoStore {
@@ -55,6 +61,10 @@ class MongoStore {
   }
   async update(name, id, changes) {
     return this.normalize(await this.models[name].findByIdAndUpdate(id, changes, { new: true }).lean());
+  }
+  async delete(name, id) {
+    const doc = await this.models[name].findByIdAndDelete(id).lean();
+    return this.normalize(doc);
   }
 }
 

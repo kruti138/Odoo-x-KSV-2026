@@ -9,9 +9,11 @@ import PDFDocument from "pdfkit";
 import nodemailer from "nodemailer";
 import { createStore } from "./store.js";
 import { quotationTotals } from "./seed.js";
+import RecommendationService from "./services/recommendation.js";
 
 const app = express();
 const store = await createStore();
+const recommendationService = new RecommendationService(store);
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || "vendorbridge-demo-secret";
 const allowedOrigins = process.env.CORS_ORIGINS
@@ -296,6 +298,17 @@ app.get("/api/community/join/:token", async (req, res) => {
   });
 });
 
+app.get('/api/rfqs/:id/recommendations', auth, async (req, res) => {
+  try {
+    const rfqId = req.params.id;
+    const result = await recommendationService.calculateForRfq(rfqId);
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to calculate recommendations.' });
+  }
+});
+
 app.post("/api/community/invite", auth, allow("Procurement Officer"), requireOrganization, async (req, res) => {
   const email = req.body.email ? String(req.body.email).trim().toLowerCase() : null;
   if (email) {
@@ -383,7 +396,28 @@ app.post("/api/quotations", auth, allow("Vendor"), async (req, res) => {
     ? await store.update("quotations", previous.id, { ...req.body, vendorId: vendor.id, organizationId: rfq.organizationId, status: req.body.status || "Submitted", updatedAt: new Date().toISOString() })
     : await store.create("quotations", { ...req.body, vendorId: vendor.id, organizationId: rfq.organizationId, status: req.body.status || "Submitted", createdAt: new Date().toISOString() });
   await activity("Quotation", `${vendor?.name || "Vendor"} ${previous ? "updated" : "submitted"} a quotation`, rfq.organizationId);
+  // Recalculate recommendations for this RFQ asynchronously
+  (async () => {
+    try {
+      await recommendationService.recalculateForRfq(quotation.rfqId);
+    } catch (err) {
+      console.error("Recommendation recalculation failed:", err);
+    }
+  })();
+
   res.status(previous ? 200 : 201).json({ ...quotation, ...quotationTotals(quotation) });
+});
+
+app.delete("/api/quotations/:id", auth, allow("Procurement Officer", "Vendor", "Admin"), async (req, res) => {
+  const current = await store.get("quotations", req.params.id);
+  if (!current) return res.status(404).json({ message: "Quotation not found." });
+  if (req.user.role === "Vendor" && req.user.vendorId !== current.vendorId) return res.status(403).json({ message: "You may only delete your own quotations." });
+  await store.delete("quotations", req.params.id);
+  await activity("Quotation", `Quotation ${req.params.id} deleted by ${req.user.firstName} ${req.user.lastName}`, current.organizationId || null);
+  (async () => {
+    try { await recommendationService.recalculateForRfq(current.rfqId); } catch (e) { console.error(e); }
+  })();
+  res.json({ message: "Deleted" });
 });
 
 app.post("/api/approvals", auth, allow("Procurement Officer"), requireOrganization, async (req, res) => {

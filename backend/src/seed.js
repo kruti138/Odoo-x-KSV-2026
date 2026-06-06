@@ -1,4 +1,6 @@
 export const seed = {
+  communities: [],
+  communityInvites: [],
   users: [],
   vendors: [],
   rfqs: [],

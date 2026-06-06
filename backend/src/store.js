@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { seed } from "./seed.js";
 
-const collections = ["users", "vendors", "rfqs", "quotations", "approvals", "purchaseOrders", "invoices", "activities", "notifications"];
+const collections = ["communities", "communityInvites", "users", "vendors", "rfqs", "quotations", "approvals", "purchaseOrders", "invoices", "activities", "notifications"];
 const clone = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 
 class MemoryStore {

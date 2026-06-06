@@ -86,11 +86,35 @@ function PageHead({ title, subtitle, action }) {
 }
 
 function Auth({ onAuth }) {
-  const [signup, setSignup] = useState(false);
+  const [inviteToken] = useState(() => new URLSearchParams(window.location.search).get("invite"));
+  const [inviteInfo, setInviteInfo] = useState(null);
+  const [inviteError, setInviteError] = useState("");
+  const [signup, setSignup] = useState(!!inviteToken);
   const [forgot, setForgot] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", password: "", phone: "", role: "Procurement Officer", country: "", additionalInfo: "", companyName: "", category: "", gst: "" });
+  const [form, setForm] = useState({
+    firstName: "", lastName: "", email: "", password: "", phone: "",
+    role: inviteToken ? "Manager / Approver" : "Procurement Officer",
+    country: "", additionalInfo: "", companyName: "", category: "", gst: "",
+    inviteToken: inviteToken || ""
+  });
+  useEffect(() => {
+    if (!inviteToken) return undefined;
+    fetch(`${API}/community/join/${inviteToken}`)
+      .then(async (response) => {
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.message || "Invalid invitation link.");
+        }
+        return response.json();
+      })
+      .then((info) => {
+        setInviteInfo(info);
+        if (info.email) setForm((current) => ({ ...current, email: info.email }));
+      })
+      .catch((err) => setInviteError(err.message));
+  }, [inviteToken]);
   const submit = async (e) => {
     e.preventDefault(); setLoading(true); setError("");
     try {
@@ -98,8 +122,11 @@ function Auth({ onAuth }) {
         const result = await request("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email: form.email }) });
         setError(result.message); setForgot(false);
       } else {
-        const result = await request(`/auth/${signup ? "signup" : "login"}`, { method: "POST", body: JSON.stringify(form) });
-        localStorage.setItem("vb_token", result.token); onAuth(result.user);
+        const payload = { ...form, ...(inviteToken ? { role: "Manager / Approver", inviteToken } : {}) };
+        const result = await request(`/auth/${signup ? "signup" : "login"}`, { method: "POST", body: JSON.stringify(payload) });
+        localStorage.setItem("vb_token", result.token);
+        if (inviteToken) window.history.replaceState({}, "", window.location.pathname);
+        onAuth(result.user);
       }
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   };
@@ -118,18 +145,20 @@ function Auth({ onAuth }) {
       <section className="auth-card">
         {signup && <div className="photo-upload"><Camera /><strong>Upload Photo</strong><small>JPG, PNG up to 2MB</small></div>}
         {!signup && <div className="auth-emblem">VB</div>}
-        <h2>{forgot ? "Reset Your Password" : signup ? "Create Your Account" : "Welcome Back"}</h2>
-        <p>{forgot ? "Enter your email to receive reset instructions" : signup ? "Fill in your details to get started with VendorBridge" : "Login to continue to VendorBridge"}</p>
+        <h2>{forgot ? "Reset Your Password" : inviteToken ? "Join Your Community" : signup ? "Create Your Account" : "Welcome Back"}</h2>
+        <p>{forgot ? "Enter your email to receive reset instructions" : inviteToken ? (inviteInfo ? `Create your manager account to join ${inviteInfo.communityName}` : "Validating your invitation link...") : signup ? "Fill in your details to get started with VendorBridge" : "Login to continue to VendorBridge"}</p>
         <form onSubmit={submit} className={cx("auth-form", signup && "two-col")}>
           {signup && <><Field label="First Name" icon={User} placeholder="Enter your first name" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required /><Field label="Last Name" icon={User} placeholder="Enter your last name" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required /></>}
-          <Field label="Email Address" className="span-2" icon={Mail} type="email" placeholder="Enter your email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+          <Field label="Email Address" className="span-2" icon={Mail} type="email" placeholder="Enter your email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required readOnly={!!inviteInfo?.email} />
           {!forgot && <Field label="Password" className="span-2" icon={LockKeyhole} type="password" placeholder="Enter your password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />}
-          {signup && <><Field label="Phone Number" icon={Phone} placeholder="Enter your phone number" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /><Field label="Role" icon={ShieldCheck} as="select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{["Procurement Officer", "Vendor", "Manager / Approver", "Admin"].map((role) => <option key={role}>{role}</option>)}</Field><Field label="Country" className="span-2" icon={Globe2} value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} />{form.role === "Vendor" && <><Field label="Company / Vendor Name" className="span-2" icon={Building2} value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} required /><Field label="Vendor Category" icon={Boxes} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required /><Field label="GST Number" icon={FileText} value={form.gst} onChange={(e) => setForm({ ...form, gst: e.target.value })} required /></>}<Field label="Additional Information (Optional)" className="span-2" icon={FileText} value={form.additionalInfo} onChange={(e) => setForm({ ...form, additionalInfo: e.target.value })} /></>}
+          {signup && !inviteToken && <><Field label="Phone Number" icon={Phone} placeholder="Enter your phone number" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /><Field label="Role" icon={ShieldCheck} as="select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{["Procurement Officer", "Vendor", "Manager / Approver", "Admin"].map((role) => <option key={role}>{role}</option>)}</Field><Field label="Country" className="span-2" icon={Globe2} value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} />{form.role === "Vendor" && <><Field label="Company / Vendor Name" className="span-2" icon={Building2} value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} required /><Field label="Vendor Category" icon={Boxes} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required /><Field label="GST Number" icon={FileText} value={form.gst} onChange={(e) => setForm({ ...form, gst: e.target.value })} required /></>}<Field label="Additional Information (Optional)" className="span-2" icon={FileText} value={form.additionalInfo} onChange={(e) => setForm({ ...form, additionalInfo: e.target.value })} /></>}
+          {signup && inviteToken && <Field label="Phone Number" className="span-2" icon={Phone} placeholder="Enter your phone number" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />}
+          {inviteError && <div className="form-message">{inviteError}</div>}
           {!signup && !forgot && <div className="auth-options"><label><input type="checkbox" /> Remember me</label><button type="button" onClick={() => setForgot(true)}>Forgot Password?</button></div>}
           {error && <div className={cx("form-message", error.includes("prepared") && "success")}>{error}</div>}
-          <Button className="gradient full" icon={signup ? UserPlus : ArrowRight} disabled={loading}>{loading ? "Please wait..." : forgot ? "Send Reset Link" : signup ? "Create Account" : "Log In"}</Button>
+          <Button className="gradient full" icon={signup ? UserPlus : ArrowRight} disabled={loading || !!inviteError}>{loading ? "Please wait..." : forgot ? "Send Reset Link" : inviteToken ? "Join Community" : signup ? "Create Account" : "Log In"}</Button>
         </form>
-        <p className="auth-switch">{signup ? "Already have an account?" : forgot ? "Remembered your password?" : "Don't have an account?"} <button onClick={() => { setSignup(!signup && !forgot); setForgot(false); setError(""); }}>{signup || forgot ? "Sign in" : "Sign up"}</button></p>
+        {!inviteToken && <p className="auth-switch">{signup ? "Already have an account?" : forgot ? "Remembered your password?" : "Don't have an account?"} <button onClick={() => { setSignup(!signup && !forgot); setForgot(false); setError(""); }}>{signup || forgot ? "Sign in" : "Sign up"}</button></p>}
       </section>
     </div>
     <footer className="auth-footer"><span><ShieldCheck /> Enterprise Grade Security</span><span><LockKeyhole /> Your data is safe with us</span><span><Headphones /> 24/7 Customer Support</span><small>© 2026 VendorBridge. All rights reserved.</small></footer>
@@ -186,10 +215,19 @@ function Shell({ user, onLogout }) {
 function Metric({ icon: Icon, label, value, change, tone = "green" }) {
   return <article className="metric"><span className={`metric-icon ${tone}`}><Icon /></span><div><small>{label}</small><strong>{value}</strong><em>{change}</em></div></article>;
 }
-function Dashboard({ data, go, user }) {
+function Dashboard({ data, go, user, notify }) {
   if (user.role === "Vendor") return <VendorDashboard data={data} go={go} user={user} />;
   if (user.role === "Manager / Approver") return <ManagerDashboard data={data} go={go} user={user} />;
   if (user.role === "Admin") return <AdminDashboard data={data} go={go} user={user} />;
+  const inviteManager = async () => {
+    try {
+      const result = await request("/community/invite", { method: "POST", body: JSON.stringify({}) });
+      await navigator.clipboard.writeText(result.inviteLink);
+      notify("Manager invite link copied. Share it so they can join your community.");
+    } catch (err) {
+      notify(err.message);
+    }
+  };
   const spend = data.invoices.reduce((sum, invoice) => sum + invoice.total, 0);
   const chart = [{ month: "Jan", spend: 110000, orders: 8 }, { month: "Feb", spend: 135000, orders: 9 }, { month: "Mar", spend: 176000, orders: 12 }, { month: "Apr", spend: 228000, orders: 19 }, { month: "May", spend: 131000, orders: 11 }, { month: "Jun", spend: spend || 207090, orders: data.purchaseOrders.length + 8 }];
   return <>
@@ -199,7 +237,7 @@ function Dashboard({ data, go, user }) {
       <section className="panel"><header><h2>Recent Purchase Orders</h2><Button secondary onClick={() => go("orders")}>View All</Button></header><div className="table-scroll"><table><thead><tr><th>PO#</th><th>Vendor</th><th>Amount</th><th>Status</th></tr></thead><tbody>{data.purchaseOrders.slice(0, 5).map((po) => <tr key={po.id}><td>{po.number}</td><td><div className="vendor-cell"><span className="mini-avatar">{initials(po.vendor?.name)}</span>{po.vendor?.name}</div></td><td>{money(po.total)}</td><td><Status value={po.status} /></td></tr>)}</tbody></table></div></section>
       <section className="panel chart-panel"><header><h2>Spending Trends <small>last 6 months</small></h2><span className="select-pill">6 Months <ChevronDown /></span></header><ResponsiveContainer width="100%" height={300}><BarChart data={chart}><CartesianGrid strokeDasharray="3 3" stroke="#1f3142" vertical={false} /><XAxis dataKey="month" stroke="#8190a5" /><YAxis stroke="#8190a5" /><Tooltip contentStyle={{ background: "#0c1928", border: "1px solid #26384c" }} /><Legend /><Bar dataKey="spend" fill="#6948db" radius={[6, 6, 0, 0]} /><Line type="monotone" dataKey="orders" stroke="#4ade80" /></BarChart></ResponsiveContainer></section>
     </div>
-    <section className="panel quick"><header><h2>Quick Actions</h2></header><div className="quick-grid">{[[Plus, "New RFQ", "Create a new RFQ", "rfqs", "green"], [UserPlus, "Add Vendor", "Register a new vendor", "vendors", "purple"], [ReceiptText, "View Invoices", "View all invoices", "invoices", "blue"], [FileCheck2, "Purchase Orders", "Manage official POs", "orders", "orange"]].map(([Icon, title, text, target, tone]) => <button key={title} onClick={() => go(target)}><span className={`quick-icon ${tone}`}><Icon /></span><div><strong>{title}</strong><small>{text}</small></div><ArrowRight /></button>)}</div></section>
+    <section className="panel quick"><header><h2>Quick Actions</h2></header><div className="quick-grid">{[[Plus, "New RFQ", "Create a new RFQ", () => go("rfqs"), "green"], [UserPlus, "Invite Manager", "Copy invitation link for managers", inviteManager, "purple"], [ReceiptText, "View Invoices", "View all invoices", () => go("invoices"), "blue"], [FileCheck2, "Purchase Orders", "Manage official POs", () => go("orders"), "orange"]].map(([Icon, title, text, action, tone]) => <button key={title} onClick={action}><span className={`quick-icon ${tone}`}><Icon /></span><div><strong>{title}</strong><small>{text}</small></div><ArrowRight /></button>)}</div></section>
   </>;
 }
 
